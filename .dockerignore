@@ -1,0 +1,15 @@
+# 依赖与构建输出
+**/node_modules
+**/target
+**/dist
+**/.idea
+.git
+**/*.log
+
+# 后端静态目录由 Docker 构建时从 Vue 产物注入，
+# 忽略本地副本可避免陈旧前端被合并进镜像。
+transfer/src/main/resources/static
+
+# 本地机密与元数据
+.env
+**/.DS_Store
