@@ -1,28 +1,42 @@
 services:
   nginx:
-    build: ./nginx          # 指向包含 Dockerfile 的目录
-    container_name: my-nginx
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: transfer-nginx
     ports:
-      - "8080:80"
-    depends_on:
-      - mysql               # 仅控制启动顺序，不代表 MySQL 就绪
+      - "${NGINX_PORT:-8080}:80"
+    # Linux 上容器访问宿主机需要显式映射；Docker Desktop 已内置该域名
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # 前端产物目录挂载到网站根目录：替换文件即生效，无需重建镜像或重启容器
+      - ${FRONTEND_DIR:-/home/transfer/transfer-ui}:/usr/share/nginx/html:ro
+    restart: unless-stopped
     networks:
       - app-net
 
   mysql:
-    image: mysql:8.0        # 直接使用官方镜像，无需 build
-    container_name: my-mysql
+    image: mysql:8.0
+    container_name: transfer-mysql
+    # 宿主机上的 Spring Boot 通过 127.0.0.1:3306 连接
     ports:
-      - "3306:3306"
+      - "${MYSQL_PORT:-3306}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: 123543
       MYSQL_DATABASE: mydb
       MYSQL_USER: transfer
       MYSQL_PASSWORD: tranfer123543
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+00:00
     volumes:
-      - mysql-data:/var/lib/mysql   # 数据持久化，防止容器删除后数据丢失
-      # 如果有初始化 SQL，取消下面注释
-      # - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-data:/var/lib/mysql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p123543"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - app-net
 

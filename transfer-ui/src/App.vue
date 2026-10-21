@@ -296,7 +296,7 @@ onMounted(() => {
             <h3>把文件放在这里</h3><p>或从设备中选择要传输的文件</p>
             <label for="file-picker" class="choose-button"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 15v4h14v-4"/></svg>选择文件</label>
             <input id="file-picker" class="visually-hidden" type="file" @change="chooseFile" />
-            <div class="limit-note"><span>单个文件最大 2 GiB</span><i></i><span>无需注册</span><i></i><span>端到端传输</span></div>
+            <div class="limit-note"><span>单个文件最大 2 GiB</span><i></i><span>无需注册</span><i></i><span>验证码下载</span></div>
           </template>
           <template v-else>
             <div class="selected-file"><div class="file-glyph"><svg viewBox="0 0 24 24"><path d="M13.5 2.8H6.8a1.8 1.8 0 0 0-1.8 1.8v14.8a1.8 1.8 0 0 0 1.8 1.8h10.4a1.8 1.8 0 0 0 1.8-1.8V8.3Z"/><path d="M13.5 2.8v5.5H19"/></svg></div><div class="selected-details"><strong>{{ selectedFile.name }}</strong><span>{{ formatSize(selectedFile.size) }}</span></div><button class="remove-file" aria-label="移除文件" @click="selectedFile = null">×</button></div>

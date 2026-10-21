@@ -1,6 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
-
-:root { font-family: 'Manrope', system-ui, sans-serif; color: #e9f2fc; background: #06111f; font-synthesis: none; text-rendering: optimizeLegibility; }
+/* 字体由 @fontsource 自托管（见 main.js），不依赖外部 CDN。 */
+:root {
+  font-family: 'Manrope', system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  color: #e9f2fc;
+  background: #06111f;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #06111f; }
 button, input { font: inherit; }

@@ -2,53 +2,83 @@ package com.God_Symbol;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.ErrorResponse;
-import org.springframework.web.ErrorResponseException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
-import org.springframework.web.server.ResponseStatusException;
-import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import java.time.Instant;
 import java.util.Map;
 
+/**
+ * 统一 API 错误响应。
+ *
+ * <p>继承 {@link ResponseEntityExceptionHandler}，让 Spring MVC 自身的异常保留正确状态码：
+ * 缺少 multipart part → 400，Content-Type 不支持 → 415，方法不支持 → 405，
+ * 静态资源缺失 → 404。此前只显式匹配少数异常，其余全部落入兜底并被误报为 500。
+ *
+ * <p>父类已经为这些异常注册了统一的 {@code handleException} 映射，因此这里只能覆写
+ * 其受保护的钩子方法，不能再重复声明同类型的 {@code @ExceptionHandler}，否则启动时
+ * 会因映射冲突而失败。
+ */
 @RestControllerAdvice
-public class ApiExceptionHandler {
+public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
   /** 文件超过容器/接口允许的大小，应返回 413 而不是 500。 */
-  @ExceptionHandler(MaxUploadSizeExceededException.class)
-  ResponseEntity<Map<String, Object>> tooLarge(MaxUploadSizeExceededException ex) {
+  @Override
+  protected ResponseEntity<Object> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException ex,
+      HttpHeaders headers, HttpStatusCode status, WebRequest request) {
     log.warn("rejected oversized upload: {}", ex.getMessage());
-    return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-        .body(body(HttpStatus.PAYLOAD_TOO_LARGE, "file exceeds the 2 GiB limit"));
+    HttpStatus tooLarge = HttpStatus.PAYLOAD_TOO_LARGE;
+    return new ResponseEntity<>(body(tooLarge, "file exceeds the 2 GiB limit"), headers, tooLarge);
   }
 
-  /**
-   * 处理携带 HTTP 状态语义的异常，包括业务抛出的 ResponseStatusException 以及框架抛出的
-   * NoResourceFoundException（静态资源缺失）等。若不在 {@link #unexpected} 之前拦截，
-   * 静态资源 404 会被统一当成 500 返回。
-   */
-  @ExceptionHandler({ResponseStatusException.class, ErrorResponseException.class, NoResourceFoundException.class})
-  ResponseEntity<Map<String, Object>> errorResponse(Exception ex) {
-    HttpStatus status = HttpStatus.valueOf(((ErrorResponse) ex).getStatusCode().value());
-    String detail = ((ErrorResponse) ex).getBody().getDetail();
-    if (status.is5xxServerError()) log.error("request failed with {}", status.value(), ex);
-    return ResponseEntity.status(status).body(body(status, detail == null ? status.getReasonPhrase() : detail));
+  /** 缺少 file 部分时给出可操作的提示，而不是笼统的 Bad Request。 */
+  @Override
+  protected ResponseEntity<Object> handleMissingServletRequestPart(
+      org.springframework.web.multipart.support.MissingServletRequestPartException ex,
+      HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+    HttpStatus badRequest = HttpStatus.BAD_REQUEST;
+    return new ResponseEntity<>(body(badRequest, "required multipart part '" + ex.getRequestPartName() + "' is missing"), headers, badRequest);
   }
 
-  /**
-   * 兜底处理未预期异常。必须记录日志，否则线上故障会完全静默、无从排查。
-   * 响应体不包含内部细节。
-   */
+  /** Content-Type 不是 multipart/form-data 时说明正确用法。 */
+  @Override
+  protected ResponseEntity<Object> handleHttpMediaTypeNotSupported(
+      org.springframework.web.HttpMediaTypeNotSupportedException ex,
+      HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+    HttpStatus unsupported = HttpStatus.UNSUPPORTED_MEDIA_TYPE;
+    return new ResponseEntity<>(body(unsupported, "Content-Type must be multipart/form-data"), headers, unsupported);
+  }
+
+  /** 兜底：未预期异常返回 500，记录完整堆栈，响应体不泄露内部细节。 */
   @ExceptionHandler(Exception.class)
   ResponseEntity<Map<String, Object>> unexpected(Exception ex) {
     log.error("unexpected error while handling request", ex);
-    return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .body(body(HttpStatus.INTERNAL_SERVER_ERROR, "transfer operation failed"));
+    HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
+    return ResponseEntity.status(status).body(body(status, "transfer operation failed"));
+  }
+
+  /**
+   * 所有框架异常最终都会走到这里（含 ResponseStatusException 等 ErrorResponseException），
+   * 在此把响应体转换为项目统一的 JSON 形状，并保留原始状态码与响应头。
+   */
+  @Override
+  protected ResponseEntity<Object> handleExceptionInternal(Exception ex, Object responseBody,
+      HttpHeaders headers, HttpStatusCode statusCode, WebRequest request) {
+    if (statusCode.is5xxServerError()) log.error("request failed with {}", statusCode.value(), ex);
+    HttpStatus status = HttpStatus.valueOf(statusCode.value());
+    String message = responseBody instanceof ProblemDetail detail && detail.getDetail() != null
+        ? detail.getDetail()
+        : status.getReasonPhrase();
+    return new ResponseEntity<>(body(status, message), headers, statusCode);
   }
 
   private Map<String, Object> body(HttpStatus status, String message) {

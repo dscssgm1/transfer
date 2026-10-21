@@ -2,16 +2,52 @@
 
 一个无登录的临时文件传输服务：A 上传文件后得到 6 位验证码，B 输入验证码即可下载；文件严格小于 2 GiB，上传 20 分钟后自动清除；上传者可在“我的文件”页管理并立即删除自己的文件。
 
-当前阶段为**单体部署**：单个 Spring Boot 进程同时提供前端页面和 `/api` 接口，元数据保存在 MySQL。后续如需微服务或多实例扩展，保持 `/api/transfers` 契约不变即可拆分。
+## 部署形态
+
+| 组件 | 运行位置 | 职责 |
+|---|---|---|
+| nginx | Docker 容器 | 托管 Vue 静态页面，反代 `/api` 与健康检查到宿主机 |
+| MySQL | Docker 容器 | 保存文件元数据 |
+| Spring Boot | 宿主机 JAR | 提供 `/api/transfers` 接口，文件写入本机存储目录 |
+
+nginx 是唯一对外入口（默认 8080），浏览器只与它通信，因此 `/api` 同源、Cookie 无需 CORS 配置。
 
 ## 目录结构
 
 ```
 transfer/
-├── Dockerfile              # 多阶段构建：前端 → 后端(打包进 Vue) → JRE
-├── docker-compose.yml      # 单 app + MySQL
+├── nginx/
+│   ├── Dockerfile          # nginx 镜像：仅配置，不含前端产物
+│   └── default.conf        # 静态托管 + /api 反代
+├── docker-compose.yml      # nginx + MySQL
 ├── transfer/               # Spring Boot 后端（Java 21 / Maven）
-└── transfer-ui/            # Vue 3 + Vite 前端源码
+└── transfer-ui/            # Vue 3 + Vite 前端项目
+    └── dist/               # 构建产物，通过 bind mount 提供给 nginx
+```
+
+### 前端使用 bind mount
+
+nginx 容器把宿主机的 `${FRONTEND_DIR}`（默认 `/home/transfer/transfer-ui`）挂载到 `/usr/share/nginx/html`，因此：
+
+- 前端产物**不打进镜像**，更新前端无需 `docker compose build`
+- 替换目录内的文件后**立即生效**，无需重启容器
+- `index.html` 响应带 `Cache-Control: no-cache`，浏览器刷新即可拿到新版本
+- `assets/` 下的文件名含内容哈希，可安全长期缓存
+
+服务器上该目录应直接存放 `dist` 的内容：
+
+```
+/home/transfer/transfer-ui/
+├── index.html
+└── assets/
+    ├── index-xxxx.js
+    └── index-xxxx.css
+```
+
+本地路径不同时用环境变量覆盖：
+
+```bash
+FRONTEND_DIR=/path/to/transfer-ui/dist docker compose up -d nginx
 ```
 
 ## 数据库
@@ -20,24 +56,64 @@ transfer/
 - 时间列使用 `DATETIME(6)` 保存 **UTC** 时间；连接串带 `serverTimezone=UTC`，容器通过 `--default-time-zone=+00:00` 固定为 UTC。
 - 表结构由 `transfer/src/main/resources/db/migration/V1__init.sql` 在启动时自动创建。
 
-## 生产部署（Docker Compose）
+## 生产部署
+
+### 1. 启动 MySQL 与 nginx
 
 ```bash
-# 在 transfer/ 目录下
-TRANSFER_OWNER_SECRET=<一段长随机字符串> \
-MYSQL_ROOT_PASSWORD=<MySQL root 密码> \
-TRANSFER_COOKIE_SECURE=true \
-docker compose up --build -d
+cd /home/transfer
+
+# 1. 构建前端并放到挂载目录
+cd transfer-ui && npm install && npm run build && cd ..
+# transfer-ui/dist/ 的内容需要位于 ${FRONTEND_DIR}（默认 /home/transfer/transfer-ui）
+
+# 2. 启动中间件
+MYSQL_ROOT_PASSWORD=<强随机密码> \
+MYSQL_PASSWORD=<强随机密码> \
+docker compose up -d --build
 ```
 
-- 服务监听 `http://<host>:8080`，根路径为 Vue 页面，`/api` 同源。
-- 上传文件存放在 Docker 卷 `transfer-data`；元数据存放在 MySQL 卷 `mysql-data`。
-- 公网 HTTPS 部署时必须设置 `TRANSFER_COOKIE_SECURE=true` 并使用强随机 `TRANSFER_OWNER_SECRET`。
-- 宿主端口可用 `APP_PORT` 覆盖（如 `APP_PORT=9000 docker compose up -d`）。Windows 上若 8080 落在 Hyper-V 保留端口段内导致绑定失败，改此变量即可。
+端口可用环境变量覆盖：`NGINX_PORT`（默认 8080）、`MYSQL_PORT`（默认 3306）、`FRONTEND_DIR`（默认 `/home/transfer/transfer-ui`）。
+
+### 更新前端
+
+```bash
+# 本地构建
+cd transfer-ui && npm run build
+
+# 覆盖到服务器挂载目录（无需重启容器）
+scp -r dist/* root@<server>:/home/transfer/transfer-ui/
+```
+
+旧版本的哈希资源不会自动删除，可定期清理 `assets/` 下未被 `index.html` 引用的文件。
+
+### 2. 启动宿主机上的 Spring Boot
+
+```bash
+java -jar transfer/target/transfer-1.0.0.jar \
+  --server.port=8080 \
+  --spring.datasource.url='jdbc:mysql://127.0.0.1:3306/transfer?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&characterEncoding=utf8&useUnicode=true' \
+  --spring.datasource.username=transfer \
+  --spring.datasource.password='<MYSQL_PASSWORD>' \
+  --transfer.storage=/var/lib/transfer/data \
+  --transfer.owner-secret='<长随机字符串>' \
+  --transfer.cookie-secure=true
+```
+
+要点：
+
+- 后端**不要**对外暴露 8080，只让 nginx 访问；公网只开 nginx 的端口。
+- `transfer.storage` 必须是**绝对路径**。相对路径会相对于 JVM 工作目录解析，systemd 下容易落到 `/data`。
+- 公网 HTTPS 时 `transfer.cookie-secure=true`，否则浏览器不会保存管理 Cookie。
+- 容器内的 nginx 通过 `host.docker.internal` 访问宿主机；Compose 已配置 `host-gateway` 映射（Linux 必需，Docker Desktop 内置）。
+
+### 3. HTTPS
+
+nginx 目前监听 80。公网部署建议在前面再加一层 HTTPS 终止（宿主机 Caddy/Nginx，或云负载均衡），并把 `transfer.cookie-secure` 保持为 `true`。
 
 ## 健康检查
 
-`/actuator/health/readiness` 已纳入 `db` 检查器：数据库不可用时返回 `503 DOWN`，因此容器健康状态和前端页脚的指示灯都能反映数据库真实状态。
+`/actuator/health/readiness` 已纳入 `db` 检查器：数据库不可用时返回 `503 DOWN`，页面页脚的指示灯也据此显示。nginx 已把该路径反代到后端。
 
 ```bash
 curl -i http://127.0.0.1:8080/actuator/health/readiness
@@ -45,16 +121,17 @@ curl -i http://127.0.0.1:8080/actuator/health/readiness
 
 ## 构建说明
 
-`Dockerfile` 为多阶段构建：`node` 编译 Vue → `maven` 打包后端并注入前端产物 → JRE 运行。静态资源**只**来自构建时的 Vue 产物（`.dockerignore` 排除了本地 `transfer/src/main/resources/static`），因此不会把陈旧的前端打进镜像。
-
-本机构建时请先同步前端产物，再打包：
+前端由 nginx 托管，后端单独打包：
 
 ```bash
-cd transfer-ui && npm run build
-rm -rf ../transfer/src/main/resources/static && mkdir -p ../transfer/src/main/resources/static
-cp -R dist/* ../transfer/src/main/resources/static/
-cd ../transfer && mvn clean package -DskipTests
+# 前端
+cd transfer-ui && npm run build        # 产物 transfer-ui/dist
+
+# 后端
+cd ../transfer && mvn clean package -DskipTests   # 产物 transfer/target/transfer-1.0.0.jar
 ```
+
+`nginx/Dockerfile` 只负责写入 `nginx/default.conf`，前端产物通过 bind mount 提供，不参与镜像构建。
 
 ## 本地开发
 
@@ -69,7 +146,7 @@ mvn spring-boot:run   # 默认 8080，连接 mysql://localhost:3306/transfer
 
 ```bash
 cd ..           # transfer/ 根目录
-docker compose up -d db
+docker compose up -d mysql
 ```
 
 前端（`transfer-ui/`）：
@@ -86,8 +163,8 @@ npm run dev           # 默认 5173，/api 代理到 http://localhost:8080
 
 ```bash
 docker compose ps
-docker compose logs --tail=100 db
-mysqladmin ping -h 127.0.0.1 -P 3306 -u transfer -ptransfer
+docker compose logs --tail=100 mysql
+mysqladmin ping -h 127.0.0.1 -P 3306 -u transfer -p
 ```
 
 手工创建库和用户（非 Docker 部署时）：
@@ -102,10 +179,12 @@ FLUSH PRIVILEGES;
 ## 备份
 
 ```bash
-docker compose exec -T db mysqldump -utransfer -ptransfer transfer > transfer-db-$(date +%F).sql
+docker compose exec -T mysql mysqldump -utransfer -p transfer > transfer-db-$(date +%F).sql
 ```
 
-MySQL 备份与 `transfer-data` 文件卷必须**同时**保留，否则数据库记录和实际文件会不一致。
+文件存放在宿主机的 `transfer.storage` 目录（示例为 `/var/lib/transfer/data`），需与数据库备份**同时**保留，否则记录和文件会不一致。两者都可直接拷贝，不涉及 Docker 卷。
+
+由于文件 20 分钟后自动删除，备份的价值主要在数据库表结构和运行配置，而不是历史文件。
 
 ## API
 
