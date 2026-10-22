@@ -1,0 +1,104 @@
+============================================
+  Android 常用命令速查
+============================================
+
+--- 项目构建 (Gradle) ---
+
+# 构建 Debug APK
+./gradlew assembleDebug
+
+# 构建 Release APK
+./gradlew assembleRelease
+
+# 构建并安装到设备
+./gradlew installDebug
+
+# 清理构建产物
+./gradlew clean
+
+# 查看所有 Gradle 任务
+./gradlew tasks
+
+# 运行单元测试
+./gradlew test
+
+# 运行 Android Instrumented 测试
+./gradlew connectedAndroidTest
+
+
+--- ADB 常用命令 ---
+
+# 查看已连接设备
+adb devices
+
+# 安装 APK
+adb install app/build/outputs/apk/debug/app-debug.apk
+
+# 覆盖安装 APK
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 卸载应用 (根据包名)
+adb uninstall com.example.secretmessage
+
+# 启动应用
+adb shell am start -n 包名/.MainActivity
+
+# 强制停止应用
+adb shell am force-stop 包名
+
+# 查看 Logcat 日志 (过滤指定包名)
+adb logcat | grep 包名
+
+# 清除应用数据
+adb shell pm clear 包名
+
+# 列出所有已安装应用的包名
+adb shell pm list packages
+
+# 截屏保存到电脑
+adb exec-out screencap -p > screenshot.png
+
+# 录屏
+adb shell screenrecord /sdcard/demo.mp4
+
+# 拉取文件
+adb pull /sdcard/demo.mp4 .
+
+# 推送文件
+adb push local.txt /sdcard/
+
+
+--- 模拟器管理 ---
+
+# 列出所有 AVD
+emulator -list-avds
+
+# 启动模拟器
+emulator -avd AVD名称
+
+# 启动模拟器并关闭终端窗口 (后台运行)
+emulator -avd AVD名称 &
+
+# 关闭模拟器
+adb -s emulator-5554 emu kill
+
+
+--- SecretMessage 项目运行命令 ---
+
+# 项目路径
+cd "E:/Android Study/9/SecretMessage"
+
+# 一键构建 + 安装 + 启动
+./gradlew installDebug && adb shell am start -n com.example.secretmessage/.MainActivity
+
+# 构建 APK
+./gradlew assembleDebug
+
+# 安装到设备
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 启动应用
+adb shell am start -n com.example.secretmessage/.MainActivity
+
+# 查看应用日志
+adb logcat | grep secretmessage

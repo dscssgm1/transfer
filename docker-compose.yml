@@ -17,14 +17,15 @@ services:
       - app-net
 
   mysql:
-    image: mysql:8.0
+    # 与 README 推荐的 8.4 LTS 保持一致；已有的数据卷由 8.4 初始化，8.0 无法降级读取
+    image: mysql:8.4
     container_name: transfer-mysql
     # 宿主机上的 Spring Boot 通过 127.0.0.1:3306 连接
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: 123543
-      MYSQL_DATABASE: mydb
+      MYSQL_DATABASE: transfer
       MYSQL_USER: transfer
       MYSQL_PASSWORD: tranfer123543
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-time-zone=+00:00

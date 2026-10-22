@@ -64,7 +64,35 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
       org.springframework.web.HttpMediaTypeNotSupportedException ex,
       HttpHeaders headers, HttpStatusCode status, WebRequest request) {
     HttpStatus unsupported = HttpStatus.UNSUPPORTED_MEDIA_TYPE;
-    return new ResponseEntity<>(body(unsupported, "Content-Type must be multipart/form-data"), headers, unsupported);
+    return new ResponseEntity<>(body(unsupported,
+        "unsupported Content-Type: use application/json for admin endpoints or multipart/form-data for uploads"),
+        headers, unsupported);
+  }
+
+  /**
+   * 方法级鉴权（@PreAuthorize）抛出的拒绝不会经过 Security 过滤器，
+   * 若不单独处理会被兜底 Exception 处理器误报为 500。
+   */
+  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+  ResponseEntity<Map<String, Object>> accessDenied(
+      org.springframework.security.access.AccessDeniedException ex) {
+    // 匿名请求按“未登录用户”系统账号授权，因此这里统一是 403；
+    // 需要登录的接口（/api/user/**、/api/admin/**）由过滤器链返回 401/403。
+    org.springframework.security.core.Authentication authentication =
+        org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+    boolean anonymous = authentication == null
+        || authentication instanceof org.springframework.security.authentication.AnonymousAuthenticationToken;
+    HttpStatus status = HttpStatus.FORBIDDEN;
+    return ResponseEntity.status(status).body(body(status,
+        anonymous ? "anonymous access is not permitted for this operation" : "insufficient permissions"));
+  }
+
+  /** 认证异常统一返回 401，避免被兜底逻辑包装成 500。 */
+  @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+  ResponseEntity<Map<String, Object>> authenticationError(
+      org.springframework.security.core.AuthenticationException ex) {
+    HttpStatus status = HttpStatus.UNAUTHORIZED;
+    return ResponseEntity.status(status).body(body(status, "authentication required"));
   }
 
   /** 兜底：未预期异常返回 500，记录完整堆栈，响应体不泄露内部细节。 */

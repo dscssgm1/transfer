@@ -20,8 +20,8 @@ class TransferServiceTest {
 
   @Test
   void uploadPersistsMetadataStreamsFileAndEnforcesOwnership() throws Exception {
-    DataSource dataSource = new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2)
-        .addScript("classpath:schema.sql").build();
+    DataSource dataSource = new EmbeddedDatabaseBuilder().generateUniqueName(true)
+        .setType(EmbeddedDatabaseType.H2).addScript("classpath:schema.sql").build();
     TransferService service = new TransferService(new TransferRepository(new JdbcTemplate(dataSource)), storage.toString(), 1024, Duration.ofHours(1));
     MockHttpServletResponse response = new MockHttpServletResponse();
     var result = service.upload(new MockMultipartFile("file", "hello.txt", "text/plain", "hello".getBytes()), null, response);
