@@ -52,6 +52,20 @@ svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-li
 .section-heading h2 { margin: 7px 0 0; color: #e0edf9; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
 .retention { display: inline-flex; align-items: center; gap: 6px; color: #708da8; font-size: 10px; }
 .retention svg { width: 14px; color: #6a98c2; }
+.capacity-widget { margin: 0 4px 14px; padding: 12px 15px; border: 1px solid rgba(105, 158, 210, .16); border-radius: 9px; background: rgba(10, 28, 48, .5); }
+.capacity-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.capacity-title { display: inline-flex; align-items: center; gap: 7px; color: #8faec8; font-size: 10.5px; letter-spacing: .2px; }
+.capacity-title svg { width: 14px; color: #6d9fc9; }
+.capacity-value { color: #c7e2f8; font: 500 11px 'DM Mono', monospace; }
+.capacity-value span { color: #67869f; }
+.capacity-track { height: 5px; overflow: hidden; margin: 9px 0 7px; border-radius: 4px; background: rgba(124, 176, 221, .14); }
+.capacity-track span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2f87d3, #5fc3e8); box-shadow: 0 0 10px rgba(79, 168, 245, .45); transition: width .45s ease; }
+.capacity-foot { display: flex; justify-content: space-between; color: #5f7d97; font: 9.5px 'DM Mono', monospace; }
+.capacity-foot strong { color: #93c6ea; font-weight: 500; }
+.capacity-widget.low { border-color: rgba(226, 137, 104, .34); background: rgba(66, 34, 26, .34); }
+.capacity-widget.low .capacity-track span { background: linear-gradient(90deg, #c96f4a, #eba05f); box-shadow: 0 0 10px rgba(233, 132, 79, .45); }
+.capacity-widget.low .capacity-title { color: #d9a184; }
+.capacity-widget.low .capacity-foot strong { color: #f0b393; }
 .drop-zone { min-height: 295px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; border: 1px dashed rgba(101, 157, 207, .4); border-radius: 13px; background: rgba(9, 27, 47, .62); box-shadow: inset 0 1px 0 rgba(166, 209, 247, .035), 0 24px 60px rgba(0, 0, 0, .1); transition: background .2s, border-color .2s; }
 .drop-zone:hover, .drop-zone.has-file { border-color: rgba(90, 168, 249, .72); background: rgba(12, 37, 64, .72); }
 .upload-art { width: 90px; height: 73px; position: relative; margin-bottom: 11px; }
@@ -83,6 +97,9 @@ svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-li
 .progress-track span { display: block; height: 100%; border-radius: inherit; background: #4fa8f5; box-shadow: 0 0 12px rgba(79, 168, 245, .75); transition: width .2s; }
 .selected-actions { display: flex; gap: 9px; margin-top: 23px; }
 .choose-button.secondary { color: #93b5d5; background: rgba(87, 139, 185, .14); box-shadow: none; }
+.choose-button.cancel-button { color: #e6a5a5; background: rgba(142, 60, 68, .2); border: 1px solid rgba(220, 111, 120, .28); }
+.choose-button.cancel-button:hover { color: #ffc4c4; background: rgba(163, 65, 76, .3); }
+.choose-button.cancel-button svg { width: 13px; }
 .send-button { min-height: 34px; padding: 0 16px; color: #f1f8ff; background: #1f80ca; box-shadow: 0 6px 22px rgba(20, 128, 213, .26); font-size: 11px; font-weight: 600; }
 .spinner { width: 13px; height: 13px; display: inline-block; border: 2px solid rgba(255,255,255,.35); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

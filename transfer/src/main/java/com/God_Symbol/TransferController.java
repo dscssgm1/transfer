@@ -26,6 +26,10 @@ public class TransferController {
     return service.list(owner).stream().map(t -> Map.<String,Object>of("key", t.key(), "name", t.name(), "size", t.size(), "expiresAt", t.expires().toString())).toList();
   }
 
+  /** 公开接口：全站共享存储的已用 / 总量 / 剩余字节数。 */
+  @GetMapping("/capacity")
+  public Map<String,Object> capacity() { return service.capacity(); }
+
   @GetMapping("/{key}")
   public Map<String,Object> info(@PathVariable String key) {
     var t = service.get(key);

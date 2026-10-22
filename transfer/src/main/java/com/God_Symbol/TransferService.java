@@ -29,13 +29,14 @@ public class TransferService {
   private final TransferRepository repository;
   private final Path root;
   private final long maxSize;
+  private final long capacity;
   private final Duration expiry;
   private final byte[] ownerSecret;
   private final boolean secureCookie;
   private final SecureRandom random = new SecureRandom();
 
   public TransferService(TransferRepository repository, String storage, long maxSize, Duration expiry) throws IOException {
-    this(repository, storage, maxSize, expiry, "change-me-in-production", false);
+    this(repository, storage, maxSize, expiry, "change-me-in-production", false, 42949672960L);
   }
 
   @Autowired
@@ -44,11 +45,13 @@ public class TransferService {
       @Value("${transfer.max-file-size:2147483647}") long maxSize,
       @Value("${transfer.expiry:24h}") Duration expiry,
       @Value("${transfer.owner-secret:change-me-in-production}") String ownerSecret,
-      @Value("${transfer.cookie-secure:false}") boolean secureCookie) {
+      @Value("${transfer.cookie-secure:false}") boolean secureCookie,
+      @Value("${transfer.capacity-bytes:42949672960}") long capacity) {
     this.repository = java.util.Objects.requireNonNull(repository, "repository");
     String configuredStorage = storage == null || storage.isBlank() ? "./data" : storage;
     this.root = Paths.get(configuredStorage).toAbsolutePath().normalize();
     this.maxSize = maxSize > 0 ? Math.min(maxSize, 2147483647L) : 2147483647L;
+    this.capacity = capacity > 0 ? capacity : 42949672960L;
     this.expiry = expiry == null || expiry.isZero() || expiry.isNegative() ? Duration.ofHours(24) : expiry;
     String configuredSecret = ownerSecret == null || ownerSecret.isBlank() ? "change-me-in-production" : ownerSecret;
     this.ownerSecret = configuredSecret.getBytes(StandardCharsets.UTF_8);
@@ -60,8 +63,15 @@ public class TransferService {
     Files.createDirectories(root);
   }
 
+  /** 公开的容量信息：已用、总量、剩余。不含任何用户或文件细节。 */
+  public Map<String,Object> capacity() {
+    long used = repository.usedBytes(Instant.now());
+    return Map.of("used", used, "limit", capacity, "available", Math.max(0, capacity - used));
+  }
+
   public Map<String,Object> upload(MultipartFile multipart, String owner, HttpServletResponse response) throws IOException {
     if (multipart == null || multipart.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "file is empty");
+    requiredCapacity(multipart.getSize());
     owner = validOwner(owner, response);
     for (int attempt = 0; attempt < 10; attempt++) {
       String key = randomKey(); String stored = key + ".bin"; Path target = safePath(stored); Path tmp = safePath(key + "." + UUID.randomUUID() + ".tmp");
@@ -71,6 +81,8 @@ public class TransferService {
           byte[] buffer = new byte[8192]; int read;
           while ((read = in.read(buffer)) != -1) { size += read; if (size > maxSize) throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "file exceeds limit"); out.write(buffer, 0, read); }
         }
+        // 写入完成后按实际字节数再校验一次，避免声明大小与实际不符。
+        requiredCapacity(size);
         try { Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE); } catch (AtomicMoveNotSupportedException e) { Files.move(tmp, target); }
         moved = true;
         Instant now = Instant.now(), expires = now.plus(expiry);
@@ -79,6 +91,17 @@ public class TransferService {
       } finally { Files.deleteIfExists(tmp); if (!moved || !repository.findActive(key, Instant.now()).isPresent()) Files.deleteIfExists(target); }
     }
     throw new ResponseStatusException(HttpStatus.CONFLICT, "could not allocate transfer key");
+  }
+
+  /**
+   * 校验剩余共享容量。synchronized 保证单实例下并发上传不会同时通过检查而超出配额；
+   * 若将来改为多实例，需要替换为数据库层的容量预约。
+   */
+  private synchronized void requiredCapacity(long additional) {
+    long used = repository.usedBytes(Instant.now());
+    if (additional > capacity - used) {
+      throw new ResponseStatusException(HttpStatus.INSUFFICIENT_STORAGE, "not enough shared storage capacity");
+    }
   }
 
   public TransferRepository.Transfer get(String key) {

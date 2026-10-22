@@ -8,6 +8,7 @@ const lookupError = ref('')
 const selectedFile = ref(null)
 const uploadProgress = ref(0)
 const uploadBusy = ref(false)
+const uploadCancelled = ref(false)
 const uploadResult = ref(null)
 const uploadError = ref('')
 const transfers = ref([])
@@ -16,6 +17,7 @@ const listError = ref('')
 const deletingKey = ref('')
 const toast = ref('')
 const serviceStatus = ref('checking')
+const capacity = ref({ used: 0, limit: 0, available: 0 })
 const helpOpen = ref(false)
 const helpTab = ref('web')
 let toastTimer
@@ -23,6 +25,12 @@ let statusTimer
 
 const MAX_SIZE = 2147483647
 const siteOrigin = window.location.origin
+
+const capacityPercent = computed(() => {
+  if (!capacity.value.limit) return 0
+  return Math.min(100, Math.round((capacity.value.used / capacity.value.limit) * 100))
+})
+const capacityLow = computed(() => capacity.value.limit > 0 && capacityPercent.value >= 90)
 const validCode = computed(() => /^[A-Z2-9]{6}$/.test(code.value.trim().toUpperCase()))
 
 function navigate(next) {
@@ -61,7 +69,21 @@ function chooseFile(event) {
     uploadError.value = '文件必须小于 2 GiB。'
     return
   }
+  if (capacity.value.limit && file.size > capacity.value.available) {
+    uploadError.value = `共享空间不足：当前剩余 ${formatSize(capacity.value.available)}，放不下这个文件。`
+    return
+  }
   selectedFile.value = file
+}
+
+async function loadCapacity() {
+  try {
+    const response = await fetch('/api/transfers/capacity')
+    if (!response.ok) return
+    capacity.value = await response.json()
+  } catch {
+    // 容量展示属于增强信息，失败时保持界面可用。
+  }
 }
 
 function dropFile(event) {
@@ -74,9 +96,18 @@ function dropFile(event) {
   chooseFile({ target: input })
 }
 
+let uploadXhr = null
+
+function cancelUpload() {
+  if (!uploadXhr) return
+  uploadCancelled.value = true
+  uploadXhr.abort()
+}
+
 async function uploadFile() {
   if (!selectedFile.value || uploadBusy.value) return
   uploadBusy.value = true
+  uploadCancelled.value = false
   uploadProgress.value = 0
   uploadError.value = ''
   uploadResult.value = null
@@ -84,6 +115,7 @@ async function uploadFile() {
   form.append('file', selectedFile.value)
   try {
     const xhr = new XMLHttpRequest()
+    uploadXhr = xhr
     const response = await new Promise((resolve, reject) => {
       xhr.open('POST', '/api/transfers')
       xhr.withCredentials = true
@@ -92,16 +124,24 @@ async function uploadFile() {
       }
       xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve(JSON.parse(xhr.responseText)) : reject(new Error(readApiError(xhr.responseText, xhr.status)))
       xhr.onerror = () => reject(new Error('网络连接失败，请检查服务状态后重试。'))
-      xhr.onabort = () => reject(new Error('上传已取消。'))
+      xhr.onabort = () => reject(new Error('上传已取消'))
       xhr.send(form)
     })
     uploadResult.value = response
     selectedFile.value = null
     uploadProgress.value = 100
     notify('文件已上传')
+    loadCapacity()
   } catch (error) {
-    uploadError.value = error.message || '上传失败，请稍后重试。'
+    if (uploadCancelled.value) {
+      uploadError.value = '上传已取消，服务器上没有留下任何文件。'
+      uploadProgress.value = 0
+    } else {
+      uploadError.value = error.message || '上传失败，请稍后重试。'
+    }
+    loadCapacity()
   } finally {
+    uploadXhr = null
     uploadBusy.value = false
   }
 }
@@ -147,6 +187,7 @@ async function deleteTransfer(item) {
     transfers.value = transfers.value.filter(transfer => transfer.key !== item.key)
     if (uploadResult.value?.key === item.key) uploadResult.value = null
     notify('文件已删除')
+    loadCapacity()
   } catch (error) {
     notify(error.message || '删除失败，请重试')
   } finally {
@@ -242,6 +283,7 @@ onMounted(() => {
   window.addEventListener('hashchange', onHashChange)
   window.addEventListener('keydown', handleKeydown)
   checkService()
+  loadCapacity()
   statusTimer = setInterval(checkService, 30000)
   if (page.value === 'manage') loadTransfers()
 })
@@ -290,6 +332,18 @@ onMounted(() => {
 
       <section class="upload-section">
         <div class="section-heading"><div><span class="section-kicker">SEND A FILE</span><h2>开始一次传输</h2></div><span class="retention"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/></svg>20 分钟后自动清除</span></div>
+
+        <div v-if="capacity.limit" class="capacity-widget" :class="{ low: capacityLow }">
+          <div class="capacity-head">
+            <span class="capacity-title"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/></svg>共享存储空间</span>
+            <span class="capacity-value">{{ formatSize(capacity.used) }} <span>/ {{ formatSize(capacity.limit) }}</span></span>
+          </div>
+          <div class="capacity-track"><span :style="{ width: `${capacityPercent}%` }"></span></div>
+          <div class="capacity-foot">
+            <span>全站已用 {{ capacityPercent }}%</span>
+            <span>剩余 <strong>{{ formatSize(capacity.available) }}</strong></span>
+          </div>
+        </div>
         <div v-if="!uploadResult" class="drop-zone" :class="{ 'is-hover': false, 'has-file': selectedFile }" @dragover.prevent @drop.prevent="dropFile">
           <template v-if="!selectedFile">
             <div class="upload-art"><span class="art-orbit orbit-one"></span><span class="art-orbit orbit-two"></span><span class="art-core"><svg viewBox="0 0 32 32"><path d="M16 22V8m0 0-5 5m5-5 5 5M7 20v5h18v-5"/></svg></span></div>
@@ -301,7 +355,17 @@ onMounted(() => {
           <template v-else>
             <div class="selected-file"><div class="file-glyph"><svg viewBox="0 0 24 24"><path d="M13.5 2.8H6.8a1.8 1.8 0 0 0-1.8 1.8v14.8a1.8 1.8 0 0 0 1.8 1.8h10.4a1.8 1.8 0 0 0 1.8-1.8V8.3Z"/><path d="M13.5 2.8v5.5H19"/></svg></div><div class="selected-details"><strong>{{ selectedFile.name }}</strong><span>{{ formatSize(selectedFile.size) }}</span></div><button class="remove-file" aria-label="移除文件" @click="selectedFile = null">×</button></div>
             <div v-if="uploadBusy" class="progress-wrap"><div class="progress-label"><span>正在上传</span><span>{{ uploadProgress }}%</span></div><div class="progress-track"><span :style="{ width: `${uploadProgress}%` }"></span></div></div>
-            <div class="selected-actions"><button class="choose-button secondary" :disabled="uploadBusy" @click="document.querySelector('#file-picker').click()">更换文件</button><button class="send-button" :disabled="uploadBusy" @click="uploadFile"><span v-if="uploadBusy" class="spinner"></span><svg v-else viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>{{ uploadBusy ? '正在发送' : '开始上传' }}</button></div>
+            <div class="selected-actions">
+              <button v-if="uploadBusy" class="choose-button secondary cancel-button" @click="cancelUpload">
+                <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>取消上传
+              </button>
+              <button v-else class="choose-button secondary" @click="document.querySelector('#file-picker').click()">更换文件</button>
+              <button class="send-button" :disabled="uploadBusy" @click="uploadFile">
+                <span v-if="uploadBusy" class="spinner"></span>
+                <svg v-else viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                {{ uploadBusy ? '正在发送' : '开始上传' }}
+              </button>
+            </div>
           </template>
         </div>
         <p v-if="uploadError" class="inline-error" role="alert"><span>!</span>{{ uploadError }}</p>
@@ -347,7 +411,7 @@ onMounted(() => {
 
           <div class="help-body">
             <ol v-if="helpTab === 'web'" class="help-steps">
-              <li><span class="step-no">1</span><div><h3>上传文件</h3><p>在首页把文件拖到虚线框，或点击「选择文件」。确认文件名和大小后点击「开始上传」。</p></div></li>
+              <li><span class="step-no">1</span><div><h3>上传文件</h3><p>在首页把文件拖到虚线框，或点击「选择文件」。确认文件名和大小后点击「开始上传」。上传过程中可随时点击<strong>取消上传</strong>，服务器不会留下任何文件。</p></div></li>
               <li><span class="step-no">2</span><div><h3>拿到验证码</h3><p>上传完成后会显示一组 6 位验证码，由大写字母和数字组成。点右侧按钮可一键复制。</p></div></li>
               <li><span class="step-no">3</span><div><h3>告知对方</h3><p>对方打开同一网址，在<strong>右上角</strong>输入验证码并按回车或点箭头，页面会出现文件信息卡片，点「下载文件」即可保存。</p></div></li>
               <li><span class="step-no">4</span><div><h3>管理自己的文件</h3><p>点右上角「我的文件」，可以查看剩余时间、复制验证码、重新下载，或点击垃圾桶图标立即删除。</p></div></li>
@@ -369,6 +433,7 @@ onMounted(() => {
 
             <dl v-if="helpTab === 'rules'" class="help-rules">
               <div><dt>文件大小</dt><dd>单个文件必须<strong>小于 2 GiB</strong>，即最多 2,147,483,647 字节。超过会被拒绝（HTTP 413）。</dd></div>
+              <div><dt>共享空间</dt><dd>全站文件共享一个存储池，页面上的容量条实时显示已用和剩余。空间不足时上传会被直接拒绝，不会写入半个文件。</dd></div>
               <div><dt>保留时间</dt><dd>文件在上传 <strong>20 分钟后自动删除</strong>，同时清理数据库记录和磁盘文件。过期后验证码立即失效。</dd></div>
               <div><dt>账号</dt><dd>无需注册或登录。管理身份由浏览器 Cookie 承载，服务端用签名校验，防止伪造。</dd></div>
               <div><dt>验证码</dt><dd>6 位，由大写字母和数字组成，已排除易混淆的 <code>I</code>、<code>O</code>、<code>0</code>、<code>1</code>。</dd></div>

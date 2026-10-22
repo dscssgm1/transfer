@@ -14,6 +14,14 @@ public class TransferRepository {
 
   public TransferRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
+  /** 当前所有未过期文件占用的字节数，用于公开的容量展示与上传配额校验。 */
+  public long usedBytes(Instant now) {
+    Long used = jdbc.queryForObject(
+        "SELECT COALESCE(SUM(size_bytes), 0) FROM transfers WHERE expires_at > ?",
+        Long.class, Timestamp.from(now));
+    return used == null ? 0L : used;
+  }
+
   public boolean insert(Transfer transfer) {
     try {
       jdbc.update("INSERT INTO transfers (transfer_key, owner_id, file_name, stored_name, size_bytes, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

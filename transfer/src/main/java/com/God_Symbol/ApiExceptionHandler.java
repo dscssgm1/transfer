@@ -40,6 +40,15 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     return new ResponseEntity<>(body(tooLarge, "file exceeds the 2 GiB limit"), headers, tooLarge);
   }
 
+  /** 业务层抛出的 ResponseStatusException，保留其自定义原因文本。 */
+  @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+  ResponseEntity<Map<String, Object>> businessError(org.springframework.web.server.ResponseStatusException ex) {
+    HttpStatus status = HttpStatus.valueOf(ex.getStatusCode().value());
+    String reason = ex.getReason();
+    if (status.is5xxServerError()) log.error("request failed with {}", status.value(), ex);
+    return ResponseEntity.status(status).body(body(status, reason == null ? status.getReasonPhrase() : reason));
+  }
+
   /** 缺少 file 部分时给出可操作的提示，而不是笼统的 Bad Request。 */
   @Override
   protected ResponseEntity<Object> handleMissingServletRequestPart(
@@ -61,9 +70,24 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
   /** 兜底：未预期异常返回 500，记录完整堆栈，响应体不泄露内部细节。 */
   @ExceptionHandler(Exception.class)
   ResponseEntity<Map<String, Object>> unexpected(Exception ex) {
+    // 客户端取消上传会让 multipart 解析抛出连接重置；这是正常操作，
+    // 只记一条 info，不写错误堆栈。状态码取 nginx 约定的 499（客户端已关闭连接）。
+    if (isClientAbort(ex)) {
+      log.info("client aborted the request");
+      return ResponseEntity.status(499).build();
+    }
     log.error("unexpected error while handling request", ex);
     HttpStatus status = HttpStatus.INTERNAL_SERVER_ERROR;
     return ResponseEntity.status(status).body(body(status, "transfer operation failed"));
+  }
+
+  private boolean isClientAbort(Throwable ex) {
+    for (Throwable current = ex; current != null; current = current.getCause()) {
+      if (current instanceof org.apache.catalina.connector.ClientAbortException) return true;
+      String message = current.getMessage();
+      if (message != null && (message.contains("Connection reset") || message.contains("Broken pipe"))) return true;
+    }
+    return false;
   }
 
   /**

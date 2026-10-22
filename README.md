@@ -192,9 +192,23 @@ docker compose exec -T mysql mysqldump -utransfer -p transfer > transfer-db-$(da
 |------|------|------|
 | POST | `/api/transfers` | 上传文件（multipart 字段 `file`），返回 6 位验证码 |
 | GET | `/api/transfers` | 列出当前浏览器（owner Cookie）上传的文件 |
+| GET | `/api/transfers/capacity` | **公开**：全站共享存储的已用 / 总量 / 剩余字节数 |
 | GET | `/api/transfers/{key}` | 按验证码查询文件信息 |
 | GET | `/api/transfers/{key}/download` | 按验证码下载文件 |
 | DELETE | `/api/transfers/{key}` | 删除当前浏览器（owner Cookie）上传的文件 |
+
+### 共享存储配额
+
+默认 40 GiB（`TRANSFER_CAPACITY_BYTES=42949672960`）。已用容量按数据库中**未过期**文件的字节数汇总，页面顶部的容量条对所有人可见。
+
+空间不足时上传返回 `507 Insufficient Storage`，且不会留下临时或半成品文件。校验在写入前按声明大小执行一次，写入后再按实际字节数复核一次。
+
+```bash
+curl -s http://127.0.0.1:8080/api/transfers/capacity
+# {"used":0,"limit":42949672960,"available":42949672960}
+```
+
+> 当前实现用进程内锁保证单实例下并发上传不会超配额。若将来改为多实例，需要换成数据库层的容量预约。
 
 ## 从 PostgreSQL 迁移已有数据
 
