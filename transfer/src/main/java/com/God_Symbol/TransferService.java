@@ -50,7 +50,7 @@ public class TransferService {
     this.repository = java.util.Objects.requireNonNull(repository, "repository");
     String configuredStorage = storage == null || storage.isBlank() ? "./data" : storage;
     this.root = Paths.get(configuredStorage).toAbsolutePath().normalize();
-    this.maxSize = maxSize > 0 ? Math.min(maxSize, 2147483647L) : 2147483647L;
+    this.maxSize = maxSize > 0 ? maxSize : 2147483647L;
     this.capacity = capacity > 0 ? capacity : 42949672960L;
     this.expiry = expiry == null || expiry.isZero() || expiry.isNegative() ? Duration.ofHours(24) : expiry;
     String configuredSecret = ownerSecret == null || ownerSecret.isBlank() ? "change-me-in-production" : ownerSecret;

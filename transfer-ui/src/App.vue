@@ -23,7 +23,7 @@ const helpTab = ref('web')
 let toastTimer
 let statusTimer
 
-const MAX_SIZE = 2147483647
+const MAX_SIZE = 6442450941
 const siteOrigin = window.location.origin
 
 const capacityPercent = computed(() => {
